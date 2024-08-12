@@ -99,6 +99,21 @@ class _Array(np.ndarray):
 class _Indicator(_Array):
     pass
 
+class _DataPlus:
+    def __init__(self, df_dict: Dict[str, pd.DataFrame]):
+        self.__data = {key: _Data(df) for key, df in df_dict.items()}
+
+    def __getitem__(self, key):
+        return self.__data[key]
+
+    def items(self):
+        return self.__data.items()
+
+    def keys(self):
+        return self.__data.keys()
+
+    def values(self):
+        return self.__data.values()
 
 class _Data:
     """
@@ -125,6 +140,8 @@ class _Data:
             raise AttributeError(f"Column '{item}' not in data") from None
 
     def _set_length(self, i):
+        if i < 0 or i > len(self.__df):
+            raise ValueError(f"Data index out of bounds: {i}")
         self.__i = i
         self.__cache.clear()
 
