@@ -271,7 +271,7 @@ class StrategyPlus(metaclass=ABCMeta):
         assert (
             0 < size < 1 or round(size) == size
         ), "size must be a positive fraction of equity, or a positive whole number of units"
-        return self._broker.new_order(-size, limit, stop, sl, tp, tag)
+        return self._broker.new_order(self.symbol, -size, limit, stop, sl, tp, tag)
 
     @property
     def equity(self) -> float:
@@ -460,6 +460,7 @@ class Order:
         self.__tp_price = tp_price
         self.__parent_trade = parent_trade
         self.__tag = tag
+        self.__symbol = symbol
 
     def _replace(self, **kwargs):
         for k, v in kwargs.items():
@@ -467,7 +468,8 @@ class Order:
         return self
 
     def __repr__(self):
-        return "<Order {}>".format(
+        return "<Order symbol:{} {}>".format(
+            self.symbol,
             ", ".join(
                 f"{param}={round(value, 5)}"
                 for param, value in (
@@ -480,12 +482,12 @@ class Order:
                     ("tag", self.__tag),
                 )
                 if value is not None
-            )
+            ),
         )
 
     def cancel(self):
         """Cancel the order."""
-        self.__broker.orders.remove(self)
+        self.__broker.orders[self.__symbol].remove(self)
         trade = self.__parent_trade
         if trade:
             if self is trade._sl_order:
@@ -497,6 +499,10 @@ class Order:
                 assert False
 
     # Fields getters
+    @property
+    def symbol(self) -> str:
+        """Asset symbol."""
+        return self.__symbol
 
     @property
     def size(self) -> float:
@@ -634,8 +640,10 @@ class Trade:
         """Place new `Order` to close `portion` of the trade at next market price."""
         assert 0 < portion <= 1, "portion must be a fraction between 0 and 1"
         size = copysign(max(1, round(abs(self.__size) * portion)), -self.__size)
-        order = Order(self.__broker, size, parent_trade=self, tag=self.__tag)
-        self.__broker.orders.insert(0, order)
+        order = Order(
+            self.__broker, self.__symbol, size, parent_trade=self, tag=self.__tag
+        )
+        self.__broker.orders[self.__symbol].insert(0, order)
 
     # Fields getters
 
@@ -698,14 +706,14 @@ class Trade:
     @property
     def entry_time(self) -> Union[pd.Timestamp, int]:
         """Datetime of when the trade was entered."""
-        return self.__broker._data.index[self.__entry_bar]
+        return self.__broker._data[self.__symbol].index[self.__entry_bar]
 
     @property
     def exit_time(self) -> Optional[Union[pd.Timestamp, int]]:
         """Datetime of when the trade was exited."""
         if self.__exit_bar is None:
             return None
-        return self.__broker._data.index[self.__exit_bar]
+        return self.__broker._data[self.__symbol].index[self.__exit_bar]
 
     @property
     def is_long(self):
@@ -720,19 +728,19 @@ class Trade:
     @property
     def pl(self):
         """Trade profit (positive) or loss (negative) in cash units."""
-        price = self.__exit_price or self.__broker.last_price
+        price = self.__exit_price or self.__broker.last_price(self.__symbol)
         return self.__size * (price - self.__entry_price)
 
     @property
     def pl_pct(self):
         """Trade profit (positive) or loss (negative) in percent."""
-        price = self.__exit_price or self.__broker.last_price
+        price = self.__exit_price or self.__broker.last_price(self.__symbol)
         return copysign(1, self.__size) * (price / self.__entry_price - 1)
 
     @property
     def value(self):
         """Trade total value in cash (volume × price)."""
-        price = self.__exit_price or self.__broker.last_price
+        price = self.__exit_price or self.__broker.last_price(self.__symbol)
         return abs(self.__size) * price
 
     # SL/TP management API
@@ -777,7 +785,7 @@ class Trade:
         if price:
             kwargs = {"stop": price} if type == "sl" else {"limit": price}
             order = self.__broker.new_order(
-                -self.size, trade=self, tag=self.tag, **kwargs
+                self.symbol, -self.size, trade=self, tag=self.tag, **kwargs
             )
             setattr(self, attr, order)
 
@@ -815,11 +823,11 @@ class _Broker:
         self.positions: Dict[str, Position] = {
             symbol: Position(self, symbol=symbol) for symbol in self._data.keys()
         }
-        self.closed_trades: List[Trade] = []
+        self.closed_trades: Dict[str, List[Trade]] = defaultdict(list)
 
     def __repr__(self):
-        pl = sum([self.positions[symbol].pl for symbol in self._data.keys()])
-        n_trades = sum([len(self.trades[symbol]) for symbol in self._data.keys()])
+        pl = sum([pos.pl for pos in self.positions.values()])
+        n_trades = sum([len(t) for t in self.trades.values()])
         return f"<Broker: {self._cash:.0f}{pl:+.1f} ({n_trades} trades)>"
 
     def new_order(
@@ -899,7 +907,9 @@ class _Broker:
     @property
     def margin_available(self) -> float:
         # From https://github.com/QuantConnect/Lean/pull/3768
-        margin_used = sum(trade.value / self._leverage for trade in self.trades)
+        margin_used = sum(
+            trade.value / self._leverage for trade in chain(*self.trades.values())
+        )
         return max(0, self.equity - margin_used)
 
     def next(self, symbol: str):
@@ -913,8 +923,8 @@ class _Broker:
         # If equity is negative, set all to 0 and stop the simulation
         if equity <= 0:
             assert self.margin_available <= 0
-            for trade in self.trades:
-                self._close_trade(trade, self._data.Close[-1], i)
+            for trade in chain(*self.trades.values()):
+                self._close_trade(trade, self._data[trade.symbol].Close[-1], i)
             self._cash = 0
             self._equity[i:] = 0
             raise _OutOfMoneyError
@@ -929,7 +939,7 @@ class _Broker:
         for order in list(self.orders[symbol]):  # type: Order
 
             # Related SL/TP order was already removed
-            if order not in self.orders:
+            if order not in self.orders[symbol]:
                 continue
 
             # Check if stop condition was hit
@@ -990,23 +1000,25 @@ class _Broker:
                 # order and part of the trade was already closed beforehand
                 size = copysign(min(abs(_prev_size), abs(order.size)), order.size)
                 # If this trade isn't already closed (e.g. on multiple `trade.close(.5)` calls)
-                if trade in self.trades:
+                if trade in self.trades[symbol]:
                     self._reduce_trade(trade, price, size, time_index)
-                    assert order.size != -_prev_size or trade not in self.trades
+                    assert order.size != -_prev_size or trade not in self.trades[symbol]
                 if order in (trade._sl_order, trade._tp_order):
                     assert order.size == -trade.size
-                    assert order not in self.orders  # Removed when trade was closed
+                    assert (
+                        order not in self.orders[symbol]
+                    )  # Removed when trade was closed
                 else:
                     # It's a trade.close() order, now done
                     assert abs(_prev_size) >= abs(size) >= 1
-                    self.orders.remove(order)
+                    self.orders[symbol].remove(order)
                 continue
 
             # Else this is a stand-alone trade
 
             # Adjust price to include commission (or bid-ask spread).
             # In long positions, the adjusted price is a fraction higher, and vice versa.
-            adjusted_price = self._adjusted_price(order.size, price)
+            adjusted_price = self._adjusted_price(symbol, order.size, price)
 
             # If order size was specified proportionally,
             # precompute true size in units, accounting for margin and spread/commissions
@@ -1021,7 +1033,7 @@ class _Broker:
                 )
                 # Not enough cash/margin even for a single unit
                 if not size:
-                    self.orders.remove(order)
+                    self.orders[symbol].remove(order)
                     continue
             assert size == round(size)
             need_size = int(size)
@@ -1030,7 +1042,7 @@ class _Broker:
                 # Fill position by FIFO closing/reducing existing opposite-facing trades.
                 # Existing trades are closed at unadjusted price, because the adjustment
                 # was already made when buying.
-                for trade in list(self.trades):
+                for trade in list(self.trades[symbol]):
                     if trade.is_long == order.is_long:
                         continue
                     assert trade.size * order.size < 0
@@ -1051,13 +1063,19 @@ class _Broker:
 
             # If we don't have enough liquidity to cover for the order, cancel it
             if abs(need_size) * adjusted_price > self.margin_available * self._leverage:
-                self.orders.remove(order)
+                self.orders[symbol].remove(order)
                 continue
 
             # Open a new trade
             if need_size:
                 self._open_trade(
-                    adjusted_price, need_size, order.sl, order.tp, time_index, order.tag
+                    symbol,
+                    adjusted_price,
+                    need_size,
+                    order.sl,
+                    order.tp,
+                    time_index,
+                    order.tag,
                 )
 
                 # We need to reprocess the SL/TP orders newly added to the queue.
@@ -1082,10 +1100,10 @@ class _Broker:
                         )
 
             # Order processed
-            self.orders.remove(order)
+            self.orders[symbol].remove(order)
 
         if reprocess_orders:
-            self._process_orders()
+            self._process_orders(symbol)
 
     def _reduce_trade(self, trade: Trade, price: float, size: float, time_index: int):
         assert trade.size * size < 0
@@ -1105,22 +1123,25 @@ class _Broker:
 
             # ... by closing a reduced copy of it
             close_trade = trade._copy(size=-size, sl_order=None, tp_order=None)
-            self.trades.append(close_trade)
+            self.trades[trade.symbol].append(close_trade)
 
         self._close_trade(close_trade, price, time_index)
 
     def _close_trade(self, trade: Trade, price: float, time_index: int):
-        self.trades.remove(trade)
+        self.trades[trade.symbol].remove(trade)
         if trade._sl_order:
-            self.orders.remove(trade._sl_order)
+            self.orders[trade.symbol].remove(trade._sl_order)
         if trade._tp_order:
-            self.orders.remove(trade._tp_order)
+            self.orders[trade.symbol].remove(trade._tp_order)
 
-        self.closed_trades.append(trade._replace(exit_price=price, exit_bar=time_index))
+        self.closed_trades[trade.symbol].append(
+            trade._replace(exit_price=price, exit_bar=time_index)
+        )
         self._cash += trade.pl
 
     def _open_trade(
         self,
+        symbol: str,
         price: float,
         size: int,
         sl: Optional[float],
@@ -1128,8 +1149,8 @@ class _Broker:
         time_index: int,
         tag,
     ):
-        trade = Trade(self, size, price, time_index, tag)
-        self.trades.append(trade)
+        trade = Trade(self, symbol, size, price, time_index, tag)
+        self.trades[symbol].append(trade)
         # Create SL/TP (bracket) orders.
         # Make sure SL order is created first so it gets adversarially processed before TP order
         # in case of an ambiguous tie (both hit within a single bar).
@@ -1452,17 +1473,14 @@ class BacktestPlus:
                 # Re-run broker one last time to handle orders placed in the last strategy
                 # iteration. Use the same OHLC values as in the last broker iteration.
                 for symbol, start in starts.items():
-                    if start < len(data[symbol]):
-                        try_(
-                            partial(broker.next, symbol=symbol),
-                            exception=_OutOfMoneyError,
-                        )
+                    try_(
+                        partial(broker.next, symbol=symbol),
+                        exception=_OutOfMoneyError,
+                    )
 
             # Set data back to full length
             for symbol in data.keys():
                 data[symbol]._set_length(len(self._data[symbol]))
-
-            breakpoint()
 
             # breakpoint()
             # for i in range(start, len(self._data)):
@@ -1496,6 +1514,7 @@ class BacktestPlus:
             # data._set_length(len(self._data))
 
             equity = pd.Series(broker._equity).bfill().fillna(broker._cash).values
+            breakpoint()
             self._results = compute_stats(
                 trades=broker.closed_trades,
                 equity=equity,
