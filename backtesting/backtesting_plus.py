@@ -1514,13 +1514,12 @@ class BacktestPlus:
             # data._set_length(len(self._data))
 
             equity = pd.Series(broker._equity).bfill().fillna(broker._cash).values
-            breakpoint()
             self._results = compute_stats(
                 trades=broker.closed_trades,
                 equity=equity,
                 ohlc_data=self._data,
                 risk_free_rate=0.0,
-                strategy_instance=strategy,
+                strategy_instance=strategies,
             )
 
         return self._results
