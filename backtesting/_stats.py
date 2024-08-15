@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Union
+from typing import TYPE_CHECKING, List, Union, Dict
 from itertools import chain
 import numpy as np
 import pandas as pd
@@ -37,10 +37,10 @@ def geometric_mean(returns: pd.Series) -> float:
 
 
 def compute_stats(
-    trades: Union[List["Trade"], pd.DataFrame],
+    trades: Union[Dict[str, List["Trade"]], pd.DataFrame],
     equity: np.ndarray,
-    ohlc_data: pd.DataFrame,
-    strategy_instance: "Strategy",
+    ohlc_data: Dict[str, pd.DataFrame],
+    strategies: Dict[str, "StrategyPlus"],
     risk_free_rate: float = 0,
 ) -> pd.Series:
     assert -1 < risk_free_rate < 1
@@ -73,6 +73,7 @@ def compute_stats(
                 "EntryTime": [t.entry_time for t in trades],
                 "ExitTime": [t.exit_time for t in trades],
                 "Tag": [t.tag for t in trades],
+                "Symbol": [t.symbol for t in trades],
             }
         )
         trades_df["Duration"] = trades_df["ExitTime"] - trades_df["EntryTime"]
@@ -177,8 +178,7 @@ def compute_stats(
     s.loc["Kelly Criterion"] = win_rate - (1 - win_rate) / (
         pl[pl > 0].mean() / -pl[pl < 0].mean()
     )
-
-    s.loc["_strategy"] = next(iter(strategy_instance.values()))
+    s.loc["_strategies"] = strategies
     s.loc["_equity_curve"] = equity_df
     s.loc["_trades"] = trades_df
 

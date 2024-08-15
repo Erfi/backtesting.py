@@ -1519,7 +1519,7 @@ class BacktestPlus:
                 equity=equity,
                 ohlc_data=self._data,
                 risk_free_rate=0.0,
-                strategy_instance=strategies,
+                strategies=strategies,
             )
 
         return self._results
@@ -2001,7 +2001,10 @@ class BacktestPlus:
         return plot(
             results=results,
             df=self._data,
-            indicators=results._strategy._indicators,
+            indicators={
+                key: strategy._indicators
+                for key, strategy in results._strategies.items()
+            },
             filename=filename,
             plot_width=plot_width,
             plot_equity=plot_equity,
