@@ -1346,6 +1346,11 @@ class BacktestPlus:
                 if data.index.max() != index_max:
                     raise ValueError("All dataframes must have the same ending index")
             output[key] = data
+
+        first_index = next(iter(output.values())).index
+        for data in output.values():
+            if not data.index.equals(first_index):
+                raise ValueError("All dataframes must have the same index")
         return output
 
     def _get_start_from_indicator_attr(
