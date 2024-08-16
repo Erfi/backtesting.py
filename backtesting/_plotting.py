@@ -143,64 +143,69 @@ def _maybe_resample_data(
             "See `Backtest.plot(resample=...)`"
         )
 
-    # TODO: Resample for every key in df
     from .lib import OHLCV_AGG, TRADES_AGG, _EQUITY_AGG
 
-    df = df.resample(freq, label="right").agg(OHLCV_AGG).dropna()
+    trades_k_list = []
+    for k, d in df.items():
+        df[k] = df[k].resample(freq, label="right").agg(OHLCV_AGG).dropna()
 
-    indicators = [
-        _Indicator(
-            i.df.resample(freq, label="right")
-            .mean()
-            .dropna()
-            .reindex(df.index)
-            .values.T,
-            **dict(
-                i._opts,
-                name=i.name,
-                # Replace saved index with the resampled one
-                index=df.index,
-            ),
-        )
-        for i in indicators
-    ]
-    assert not indicators or indicators[0].df.index.equals(df.index)
+        indicators[k] = [
+            _Indicator(
+                i.df.resample(freq, label="right")
+                .mean()
+                .dropna()
+                .reindex(df[k].index)
+                .values.T,
+                **dict(
+                    i._opts,
+                    name=i.name,
+                    # Replace saved index with the resampled one
+                    index=df[k].index,
+                ),
+            )
+            for i in indicators[k]
+        ]
+        assert not indicators[k] or indicators[k][0].df.index.equals(df[k].index)
 
+        def _weighted_returns(s, trades=trades):
+            df = trades.loc[s.index]
+            return ((df["Size"].abs() * df["ReturnPct"]) / df["Size"].abs().sum()).sum()
+
+        def _group_trades(column):
+            def f(s, new_index=pd.Index(df[k].index.astype(int)), bars=trades[column]):
+                if s.size:
+                    # Via int64 because on pandas recently broken datetime
+                    mean_time = int(bars.loc[s.index].astype(int).mean())
+                    new_bar_idx = new_index.get_indexer([mean_time], method="nearest")[
+                        0
+                    ]
+                    return new_bar_idx
+
+            return f
+
+        trades_k = trades[trades.Symbol == k]
+        if len(trades_k):  # Avoid pandas "resampling on Int64 index" error
+            trades_k = (
+                trades_k.assign(count=1)
+                .resample(freq, on="ExitTime", label="right")
+                .agg(
+                    dict(
+                        TRADES_AGG,
+                        ReturnPct=_weighted_returns,
+                        count="sum",
+                        EntryBar=_group_trades("EntryTime"),
+                        ExitBar=_group_trades("ExitTime"),
+                    )
+                )
+                .dropna()
+            )
+            trades_k_list.append(trades_k)
+    trades = pd.concat(trades_k_list)
     equity_data = (
         equity_data.resample(freq, label="right").agg(_EQUITY_AGG).dropna(how="all")
     )
-    assert equity_data.index.equals(df.index)
-
-    def _weighted_returns(s, trades=trades):
-        df = trades.loc[s.index]
-        return ((df["Size"].abs() * df["ReturnPct"]) / df["Size"].abs().sum()).sum()
-
-    def _group_trades(column):
-        def f(s, new_index=pd.Index(df.index.view(int)), bars=trades[column]):
-            if s.size:
-                # Via int64 because on pandas recently broken datetime
-                mean_time = int(bars.loc[s.index].view(int).mean())
-                new_bar_idx = new_index.get_indexer([mean_time], method="nearest")[0]
-                return new_bar_idx
-
-        return f
-
-    if len(trades):  # Avoid pandas "resampling on Int64 index" error
-        trades = (
-            trades.assign(count=1)
-            .resample(freq, on="ExitTime", label="right")
-            .agg(
-                dict(
-                    TRADES_AGG,
-                    ReturnPct=_weighted_returns,
-                    count="sum",
-                    EntryBar=_group_trades("EntryTime"),
-                    ExitBar=_group_trades("ExitTime"),
-                )
-            )
-            .dropna()
-        )
-
+    sample_df = next(iter(df.values()))
+    assert equity_data.index.equals(sample_df.index)
     return df, indicators, equity_data, trades
 
 
