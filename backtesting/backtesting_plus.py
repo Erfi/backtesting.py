@@ -1487,37 +1487,6 @@ class BacktestPlus:
             for symbol in data.keys():
                 data[symbol]._set_length(len(self._data[symbol]))
 
-            # breakpoint()
-            # for i in range(start, len(self._data)):
-            #     # Prepare data and indicators for `next` call
-            #     breakpoint()
-            #     data._set_length(i + 1)
-            #     for attr, indicator in indicator_attrs:
-            #         # Slice indicator on the last dimension (case of 2d indicator)
-            #         setattr(strategy, attr, indicator[..., :i + 1])
-
-            #     # Handle orders processing and broker stuff
-            #     try:
-            #         broker.next()
-            #     except _OutOfMoneyError:
-            #         break
-
-            #     # Next tick, a moment before bar close
-            #     strategy.next()
-            # else:
-            #     # Close any remaining open trades so they produce some stats
-            #     for trade in broker.trades:
-            #         trade.close()
-
-            #     # Re-run broker one last time to handle orders placed in the last strategy
-            #     # iteration. Use the same OHLC values as in the last broker iteration.
-            #     if start < len(self._data):
-            #         try_(broker.next, exception=_OutOfMoneyError)
-
-            # # Set data back to full length
-            # # for future `indicator._opts['data'].index` calls to work
-            # data._set_length(len(self._data))
-
             equity = pd.Series(broker._equity).bfill().fillna(broker._cash).values
             self._results = compute_stats_plus(
                 trades=broker.closed_trades,
