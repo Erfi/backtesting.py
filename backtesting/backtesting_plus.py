@@ -35,8 +35,8 @@ except ImportError:
         return seq
 
 
-from ._plotting import plot  # noqa: I001
-from ._stats import compute_stats
+from ._plotting import plot_plus  # noqa: I001
+from ._stats import compute_stats_plus
 from ._util import _as_str, _Indicator, _Data, try_, _DataPlus
 
 __pdoc__ = {
@@ -1519,7 +1519,7 @@ class BacktestPlus:
             # data._set_length(len(self._data))
 
             equity = pd.Series(broker._equity).bfill().fillna(broker._cash).values
-            self._results = compute_stats(
+            self._results = compute_stats_plus(
                 trades=broker.closed_trades,
                 equity=equity,
                 ohlc_data=self._data,
@@ -2003,7 +2003,7 @@ class BacktestPlus:
                 raise RuntimeError("First issue `backtest.run()` to obtain results.")
             results = self._results
 
-        return plot(
+        return plot_plus(
             results=results,
             df=self._data,
             indicators={
