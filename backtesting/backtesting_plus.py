@@ -1689,7 +1689,7 @@ class BacktestPlus:
             # in a copy-on-write manner, achieving better performance/RAM benefit.
             backtest_uuid = np.random.random()
             param_batches = list(_batch(param_combos))
-            Backtest._mp_backtests[backtest_uuid] = (self, param_batches, maximize)  # type: ignore
+            BacktestPlus._mp_backtests[backtest_uuid] = (self, param_batches, maximize)  # type: ignore
             try:
                 # If multiprocessing start method is 'fork' (i.e. on POSIX), use
                 # a pool of processes to compute results in parallel.
@@ -1717,11 +1717,11 @@ class BacktestPlus:
                             "set multiprocessing start method to 'fork'."
                         )
                     for batch_index in _tqdm(range(len(param_batches))):
-                        _, values = Backtest._mp_task(backtest_uuid, batch_index)
+                        _, values = BacktestPlus._mp_task(backtest_uuid, batch_index)
                         for value, params in zip(values, param_batches[batch_index]):
                             heatmap[tuple(params.values())] = value
             finally:
-                del Backtest._mp_backtests[backtest_uuid]
+                del BacktestPlus._mp_backtests[backtest_uuid]
 
             best_params = heatmap.idxmax()
 
@@ -1860,7 +1860,7 @@ class BacktestPlus:
 
     @staticmethod
     def _mp_task(backtest_uuid, batch_index):
-        bt, param_batches, maximize_func = Backtest._mp_backtests[backtest_uuid]
+        bt, param_batches, maximize_func = BacktestPlus._mp_backtests[backtest_uuid]
         return batch_index, [
             maximize_func(stats) if stats["# Trades"] else np.nan
             for stats in (bt.run(**params) for params in param_batches[batch_index])
