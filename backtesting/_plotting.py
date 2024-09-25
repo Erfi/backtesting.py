@@ -1371,13 +1371,13 @@ def plot_plus(
                 tooltips.append(("Count", "@count{0,0}"))
             set_tooltips(
                 fig,
-                tooltips + [("P/L", "@returns_long{+0.[000]%}")],
+                tooltips + [("P/L", "@returns_long{+0.[000]%}"), ("Type", "Long")],
                 vline=False,
                 renderers=[r1],
             )
             set_tooltips(
                 fig,
-                tooltips + [("P/L", "@returns_short{+0.[000]%}")],
+                tooltips + [("P/L", "@returns_short{+0.[000]%}"), ("Type", "Short")],
                 vline=False,
                 renderers=[r2],
             )
