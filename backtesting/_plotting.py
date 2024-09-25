@@ -1090,6 +1090,7 @@ def plot_plus(
                 index=trades[trades.Symbol == key]["ExitBar"],
                 datetime=trades[trades.Symbol == key]["ExitTime"],
                 exit_price=trades[trades.Symbol == key]["ExitPrice"],
+                entry_price=trades[trades.Symbol == key]["EntryPrice"],
                 size=trades[trades.Symbol == key]["Size"],
                 returns_positive=(trades[trades.Symbol == key]["ReturnPct"] > 0)
                 .astype(int)
@@ -1371,13 +1372,25 @@ def plot_plus(
                 tooltips.append(("Count", "@count{0,0}"))
             set_tooltips(
                 fig,
-                tooltips + [("P/L", "@returns_long{+0.[000]%}"), ("Type", "Long")],
+                tooltips
+                + [
+                    ("Entry", "@entry_price{0,0.000}"),
+                    ("Exit", "@exit_price{0,0.000}"),
+                    ("P/L", "@returns_long{+0.[000]%}"),
+                    ("Type", "Long"),
+                ],
                 vline=False,
                 renderers=[r1],
             )
             set_tooltips(
                 fig,
-                tooltips + [("P/L", "@returns_short{+0.[000]%}"), ("Type", "Short")],
+                tooltips
+                + [
+                    ("Entry", "@entry_price{0,0.000}"),
+                    ("Exit", "@exit_price{0,0.000}"),
+                    ("P/L", "@returns_short{+0.[000]%}"),
+                    ("Type", "Short"),
+                ],
                 vline=False,
                 renderers=[r2],
             )
